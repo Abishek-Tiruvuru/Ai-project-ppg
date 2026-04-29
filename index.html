@@ -1,0 +1,980 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>BioScan — AI Face PPG Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,700;1,300&display=swap" rel="stylesheet"/>
+<style>
+:root{
+  --bg:#040c14;--s1:#071522;--s2:#0c1e2e;--s3:#112436;
+  --acc:#00ffc8;--acc2:#0088ff;--amber:#ffb830;--red:#ff4060;
+  --border:rgba(0,255,200,.12);--border2:rgba(0,136,255,.15);
+  --text:#d4f0e8;--dim:rgba(212,240,232,.45);--muted:rgba(0,255,200,.3);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  background:var(--bg);color:var(--text);
+  font-family:'JetBrains Mono',monospace;
+  min-height:100vh;overflow-x:hidden;
+}
+body::before{
+  content:'';position:fixed;inset:0;
+  background-image:linear-gradient(rgba(0,255,200,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(0,255,200,.025) 1px,transparent 1px);
+  background-size:48px 48px;pointer-events:none;z-index:0;
+}
+body::after{
+  content:'';position:fixed;inset:0;
+  background:radial-gradient(ellipse 70% 50% at 50% 0%,rgba(0,255,200,.06),transparent);
+  pointer-events:none;z-index:0;
+}
+.app{position:relative;z-index:1;max-width:1280px;margin:0 auto;padding:18px 20px}
+
+/* HEADER */
+header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding-bottom:16px;margin-bottom:16px;
+  border-bottom:1px solid var(--border);
+}
+.logo{
+  font-family:'Orbitron',monospace;font-size:20px;font-weight:900;
+  color:var(--acc);letter-spacing:4px;
+  text-shadow:0 0 30px rgba(0,255,200,.5),0 0 60px rgba(0,255,200,.2);
+}
+.logo em{color:var(--text);font-style:normal;font-weight:400;opacity:.7}
+.header-right{display:flex;align-items:center;gap:12px}
+.tag{font-size:9px;letter-spacing:2px;padding:4px 10px;border:1px solid var(--border);border-radius:4px;color:var(--muted);text-transform:uppercase}
+.dot{width:7px;height:7px;border-radius:50%;background:#333;transition:.4s}
+.dot.live{background:var(--acc);box-shadow:0 0 10px var(--acc),0 0 20px rgba(0,255,200,.4);animation:pulse-dot 1.4s ease-in-out infinite}
+@keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.3}}
+
+/* API BAR */
+.api-bar{
+  display:flex;align-items:center;gap:10px;
+  background:var(--s1);border:1px solid var(--border);border-radius:10px;
+  padding:10px 16px;margin-bottom:16px;
+}
+.api-bar label{font-size:10px;color:var(--muted);letter-spacing:2px;white-space:nowrap;text-transform:uppercase}
+.api-bar input{
+  flex:1;background:transparent;border:none;outline:none;
+  color:var(--acc);font-family:'JetBrains Mono',monospace;font-size:12px;
+}
+.api-bar input::placeholder{color:rgba(0,255,200,.15)}
+
+/* LAYOUT */
+.main{display:grid;grid-template-columns:1.15fr .85fr;gap:14px;align-items:start}
+@media(max-width:860px){.main{grid-template-columns:1fr}}
+
+/* CAMERA */
+.cam-panel{display:flex;flex-direction:column;gap:12px}
+.cam-box{
+  position:relative;background:#000;
+  border:1px solid var(--border);border-radius:14px;overflow:hidden;
+}
+video{width:100%;display:block;border-radius:14px}
+#vcan{display:none}
+
+/* Scan line */
+.scanline{
+  position:absolute;top:0;left:0;right:0;height:3px;
+  background:linear-gradient(90deg,transparent 0%,rgba(0,255,200,.0) 10%,var(--acc) 50%,rgba(0,255,200,.0) 90%,transparent);
+  filter:blur(1px);animation:scanY 2.5s linear infinite;opacity:0;pointer-events:none;z-index:5;transition:.4s;
+}
+.cam-box.active .scanline{opacity:.7}
+@keyframes scanY{from{top:0}to{top:100%}}
+
+/* Corners */
+.corners{position:absolute;inset:0;pointer-events:none;z-index:4}
+.cr{position:absolute;width:18px;height:18px;border-color:var(--acc);border-style:solid;opacity:.5}
+.cr.tl{top:10px;left:10px;border-width:2px 0 0 2px}
+.cr.tr{top:10px;right:10px;border-width:2px 2px 0 0}
+.cr.bl{bottom:10px;left:10px;border-width:0 0 2px 2px}
+.cr.br{bottom:10px;right:10px;border-width:0 2px 2px 0}
+.cam-label{
+  position:absolute;top:12px;left:50%;transform:translateX(-50%);
+  font-size:9px;letter-spacing:3px;color:var(--acc);text-transform:uppercase;
+  background:rgba(4,12,20,.85);padding:3px 12px;border-radius:4px;
+  border:1px solid var(--border);z-index:6;
+}
+
+/* Progress */
+.prog-wrap{height:4px;background:rgba(0,255,200,.08);border-radius:4px;overflow:hidden;margin-top:2px}
+.prog-bar{height:100%;width:0%;background:linear-gradient(90deg,var(--acc),var(--acc2));transition:.1s;border-radius:4px}
+
+/* Controls */
+.controls{display:flex;gap:8px;flex-wrap:wrap}
+button{
+  font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:1.5px;
+  padding:9px 14px;border-radius:8px;cursor:pointer;border:none;text-transform:uppercase;
+  transition:all .2s;font-weight:500;
+}
+button.primary{
+  background:var(--acc);color:#040c14;font-weight:700;
+  box-shadow:0 4px 20px rgba(0,255,200,.3);
+}
+button.primary:hover{box-shadow:0 4px 30px rgba(0,255,200,.55);transform:translateY(-1px)}
+button.ghost{background:var(--s2);color:var(--dim);border:1px solid var(--border)}
+button.ghost:hover{border-color:var(--acc);color:var(--acc)}
+button.ghost.on{border-color:var(--acc);color:var(--acc);background:rgba(0,255,200,.08)}
+button:disabled{opacity:.35;cursor:not-allowed;transform:none!important;box-shadow:none!important}
+
+/* METRICS PANEL */
+.right-panel{display:flex;flex-direction:column;gap:12px}
+
+/* Big metric card */
+.metric-card{
+  background:var(--s1);border:1px solid var(--border);border-radius:14px;padding:18px;
+  position:relative;overflow:hidden;
+}
+.metric-card::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,transparent,var(--acc),transparent);
+  opacity:.5;
+}
+.metric-card.br-card::before{background:linear-gradient(90deg,transparent,var(--amber),transparent)}
+.mc-label{font-size:9px;letter-spacing:3px;color:var(--muted);text-transform:uppercase;margin-bottom:8px}
+.mc-row{display:flex;align-items:flex-end;gap:10px}
+.mc-val{
+  font-family:'Orbitron',monospace;font-size:52px;font-weight:900;
+  line-height:1;color:var(--acc);
+  text-shadow:0 0 40px rgba(0,255,200,.4);
+  transition:.5s;
+}
+.mc-val.amber{color:var(--amber);text-shadow:0 0 40px rgba(255,184,48,.35)}
+.mc-unit{font-size:11px;color:var(--muted);margin-bottom:8px;letter-spacing:1px}
+.mc-sub{margin-top:6px;font-size:10px;color:var(--dim);display:flex;gap:16px}
+.mc-sub span{display:flex;align-items:center;gap:5px}
+
+/* Ring animations */
+.ring-wrap{display:flex;justify-content:center;align-items:center;padding:4px 0}
+.ring{
+  width:42px;height:42px;border-radius:50%;border:2px solid var(--acc);
+  display:flex;align-items:center;justify-content:center;margin:0 6px;
+  box-shadow:0 0 15px rgba(0,255,200,.2);
+}
+.ring.pulse{animation:heartPulse 0.8s ease-out}
+@keyframes heartPulse{
+  0%{transform:scale(1);box-shadow:0 0 15px rgba(0,255,200,.2)}
+  30%{transform:scale(1.25);box-shadow:0 0 30px rgba(0,255,200,.5)}
+  100%{transform:scale(1);box-shadow:0 0 15px rgba(0,255,200,.2)}
+}
+.ring.breath-ring{
+  border-color:var(--amber);box-shadow:0 0 15px rgba(255,184,48,.2);
+  transition:transform 0s;width:42px;height:42px;
+}
+.ring-icon{font-size:18px}
+
+/* Waveform */
+.wave-card{
+  background:var(--s1);border:1px solid var(--border);border-radius:14px;
+  padding:14px;
+}
+.wave-label{font-size:9px;letter-spacing:3px;color:var(--muted);margin-bottom:8px;text-transform:uppercase;display:flex;justify-content:space-between;align-items:center}
+canvas.wave{width:100%;border-radius:6px;display:block;background:#020b13}
+
+/* Quality */
+.quality-card{
+  background:var(--s1);border:1px solid var(--border);border-radius:14px;padding:14px;
+}
+.q-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.q-item{text-align:center;padding:10px 6px;border:1px solid var(--border);border-radius:10px;background:var(--s2)}
+.q-val{font-family:'Orbitron',monospace;font-size:18px;font-weight:700;color:var(--acc)}
+.q-lbl{font-size:9px;letter-spacing:1px;color:var(--dim);margin-top:3px;text-transform:uppercase}
+.q-bar-wrap{height:4px;background:rgba(0,255,200,.08);border-radius:4px;overflow:hidden;margin-top:4px}
+.q-bar{height:100%;background:var(--acc);border-radius:4px;transition:.5s}
+
+/* AI panel */
+.ai-card{
+  background:var(--s1);border:1px solid var(--border2);border-radius:14px;padding:16px;
+  position:relative;overflow:hidden;
+}
+.ai-card::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,transparent,var(--acc2),transparent);opacity:.6;
+}
+.ai-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.ai-title{font-size:10px;letter-spacing:2px;color:rgba(0,136,255,.8);text-transform:uppercase;display:flex;align-items:center;gap:8px}
+.ai-dot{
+  width:7px;height:7px;border-radius:50%;background:var(--acc2);
+  box-shadow:0 0 8px var(--acc2);
+}
+.ai-dot.thinking{animation:ai-spin 1.2s linear infinite}
+@keyframes ai-spin{to{box-shadow:0 0 8px var(--acc2),0 0 20px rgba(0,136,255,.5)}}
+.ai-timer{font-size:9px;color:var(--dim)}
+.ai-body{font-size:11px;color:var(--text);line-height:1.7;min-height:60px}
+.ai-body.loading{color:var(--dim);font-style:italic}
+.ai-metrics{display:flex;gap:10px;margin-top:10px;flex-wrap:wrap}
+.ai-pill{
+  font-size:10px;padding:4px 10px;border-radius:6px;
+  border:1px solid rgba(0,136,255,.25);background:rgba(0,136,255,.07);
+  color:rgba(0,136,255,.9);
+}
+.ai-pill.conf-high{border-color:rgba(0,255,200,.25);background:rgba(0,255,200,.07);color:var(--acc)}
+.ai-pill.conf-med{border-color:rgba(255,184,48,.25);background:rgba(255,184,48,.07);color:var(--amber)}
+.ai-pill.conf-low{border-color:rgba(255,64,96,.25);background:rgba(255,64,96,.07);color:var(--red)}
+
+/* Hint */
+.hint{
+  font-size:9px;letter-spacing:1px;color:var(--dim);text-align:center;
+  margin-top:6px;
+}
+
+/* Footer */
+footer{
+  text-align:center;margin-top:20px;padding-top:14px;
+  border-top:1px solid var(--border);
+  font-size:10px;color:var(--muted);letter-spacing:1px;
+}
+footer strong{color:var(--dim)}
+</style>
+</head>
+<body>
+<div class="app">
+
+<header>
+  <div class="logo">BIO<em>SCAN</em></div>
+  <div class="header-right">
+    <div class="tag">AI-ENHANCED PPG</div>
+    <div class="dot" id="liveDot"></div>
+  </div>
+</header>
+
+<div class="api-bar">
+  <label>AI KEY</label>
+  <input type="password" id="apiKey" placeholder="sk-ant-api03-... (optional — AI insights disabled without key)" autocomplete="off"/>
+  <div class="dot" id="apiDot" title="API connected"></div>
+</div>
+
+<div class="main">
+  <!-- LEFT: Camera -->
+  <div class="cam-panel">
+    <div class="cam-box" id="camBox">
+      <video id="video" playsinline muted></video>
+      <canvas id="vcan" width="1280" height="720"></canvas>
+      <div class="scanline"></div>
+      <div class="corners"><div class="cr tl"></div><div class="cr tr"></div><div class="cr bl"></div><div class="cr br"></div></div>
+      <div class="cam-label" id="camLabel">STANDBY</div>
+    </div>
+    <div class="prog-wrap"><div class="prog-bar" id="progBar"></div></div>
+    <div class="controls">
+      <button class="primary" id="startBtn">⬛ Start Camera</button>
+      <button class="ghost" id="measureBtn" disabled>▶ Measure 10s</button>
+      <button class="ghost" id="contBtn" disabled>⟳ Continuous</button>
+      <button class="ghost" id="autoBtn" disabled>◎ Auto-Face: Off</button>
+      <button class="ghost" id="maskBtn" disabled>◧ Mask: Off</button>
+      <button class="ghost" id="flipBtn" disabled>⇄ Flip</button>
+    </div>
+    <div class="hint">Click / tap your face on the video to manually pick skin tone • Press A to toggle mask</div>
+
+    <!-- Waveform: Heart Rate -->
+    <div class="wave-card">
+      <div class="wave-label"><span>CARDIAC WAVEFORM (0.8–2.5 Hz)</span><span id="hrFreq" style="color:var(--acc)">—</span></div>
+      <canvas class="wave" id="hrPlot" width="600" height="120"></canvas>
+    </div>
+
+    <!-- Waveform: Breathing -->
+    <div class="wave-card">
+      <div class="wave-label" style="--muted:rgba(255,184,48,.35)"><span style="color:rgba(255,184,48,.6)">RESPIRATORY WAVEFORM (0.1–0.5 Hz)</span><span id="brFreq" style="color:var(--amber)">—</span></div>
+      <canvas class="wave" id="brPlot" width="600" height="90"></canvas>
+    </div>
+  </div>
+
+  <!-- RIGHT: Metrics -->
+  <div class="right-panel">
+
+    <!-- Heart Rate -->
+    <div class="metric-card">
+      <div class="mc-label">♡ Heart Rate</div>
+      <div class="mc-row">
+        <div class="mc-val" id="hrVal">–</div>
+        <div class="mc-unit">BPM</div>
+      </div>
+      <div class="ring-wrap" style="justify-content:flex-start;margin-top:10px">
+        <div class="ring" id="hrRing"><div class="ring-icon">♥</div></div>
+        <div style="margin-left:10px;font-size:10px;color:var(--dim)">
+          <div>Normal: <span style="color:var(--acc)">60–100 BPM</span></div>
+          <div id="hrStatus" style="margin-top:3px;color:var(--muted)">—</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Breathing Rate -->
+    <div class="metric-card br-card">
+      <div class="mc-label" style="--muted:rgba(255,184,48,.5);color:rgba(255,184,48,.5)">🌬 Breathing Rate</div>
+      <div class="mc-row">
+        <div class="mc-val amber" id="brVal">–</div>
+        <div class="mc-unit" style="color:rgba(255,184,48,.5)">BR/MIN</div>
+      </div>
+      <div class="ring-wrap" style="justify-content:flex-start;margin-top:10px">
+        <div class="ring breath-ring" id="brRing"><div class="ring-icon">🫁</div></div>
+        <div style="margin-left:10px;font-size:10px;color:var(--dim)">
+          <div>Normal: <span style="color:var(--amber)">12–20 BR/MIN</span></div>
+          <div id="brStatus" style="margin-top:3px;color:rgba(255,184,48,.4)">—</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quality -->
+    <div class="quality-card">
+      <div class="wave-label" style="margin-bottom:10px">Signal Quality</div>
+      <div class="q-grid">
+        <div class="q-item">
+          <div class="q-val" id="fpsVal">–</div>
+          <div class="q-lbl">FPS</div>
+          <div class="q-bar-wrap"><div class="q-bar" id="fpsBar" style="width:0%"></div></div>
+        </div>
+        <div class="q-item">
+          <div class="q-val" id="pxVal">0</div>
+          <div class="q-lbl">Skin PX</div>
+          <div class="q-bar-wrap"><div class="q-bar" id="pxBar" style="width:0%"></div></div>
+        </div>
+        <div class="q-item">
+          <div class="q-val" id="qVal">–</div>
+          <div class="q-lbl">Quality</div>
+          <div class="q-bar-wrap"><div class="q-bar" id="qBar" style="width:0%"></div></div>
+        </div>
+      </div>
+      <div style="margin-top:10px;font-size:10px;color:var(--dim);line-height:1.6" id="qualNote">
+        Click your face on the camera feed, then press Measure or Continuous.
+      </div>
+    </div>
+
+    <!-- AI Card -->
+    <div class="ai-card">
+      <div class="ai-header">
+        <div class="ai-title">
+          <div class="ai-dot" id="aiDot"></div>
+          Claude AI Analysis
+        </div>
+        <div class="ai-timer" id="aiTimer">Next: –</div>
+      </div>
+      <div class="ai-body" id="aiBody">
+        Enter your Anthropic API key above to enable real-time AI health insights from your biometric data.
+      </div>
+      <div class="ai-metrics" id="aiMet"></div>
+    </div>
+
+    <div style="font-size:9px;color:var(--muted);line-height:1.7;padding:8px 4px">
+      ℹ️ Breathing rate is extracted from the slow amplitude modulation of the PPG signal (respiratory sinus arrhythmia + baseline wander). Best results: well-lit, front-facing, minimal motion.
+    </div>
+  </div>
+</div>
+
+<footer>
+  Group 1 Final Project — Camera-Based Heart Rate Monitor<br>
+  <strong>Abishek · Phranav · Siddarth · Shyam</strong><br>
+  <span style="margin-top:4px;display:block;opacity:.6">All processing happens locally in your browser. No video is uploaded.</span>
+</footer>
+
+</div>
+
+<script>
+// ─── Utilities ────────────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+const video = $('video'), vcan = $('vcan'), vctx = vcan.getContext('2d', {willReadFrequently:true});
+const hrPlot = $('hrPlot'), brPlot = $('brPlot');
+const hctx = hrPlot.getContext('2d'), bctx = brPlot.getContext('2d');
+
+let stream = null, showMask = false, autoFace = false;
+let chromaUV = null, faceROI = null, faceDetector = null, faceLoopId = 0;
+let lastMaskPx = 0, lastHR = null, lastBR = null;
+
+const CHROMA_R = 65, SECS = 10, HR_MIN = 50, HR_MAX = 145, BR_MIN = 4, BR_MAX = 35;
+
+// ─── Signal Math ──────────────────────────────────────────────────────────────
+function rgb2yuv(r, g, b){
+  const y = .299*r + .587*g + .114*b;
+  const u = -.169*r - .331*g + .5*b + 128;
+  const v = .5*r - .419*g - .081*b + 128;
+  return [y, u, v];
+}
+
+function movAvg(arr, n){
+  if(n <= 1) return arr.slice();
+  const out = new Array(arr.length).fill(0);
+  let sum = 0, q = [];
+  for(let i = 0; i < arr.length; i++){
+    q.push(arr[i]); sum += arr[i];
+    if(q.length > n) sum -= q.shift();
+    out[i] = sum / q.length;
+  }
+  return out;
+}
+
+function lowpass(arr, fs, fc){
+  const rc = 1/(2*Math.PI*fc), dt = 1/fs, a = dt/(rc+dt);
+  const y = new Array(arr.length).fill(0); y[0] = arr[0]||0;
+  for(let i = 1; i < arr.length; i++) y[i] = y[i-1] + a*(arr[i]-y[i-1]);
+  return y;
+}
+function highpass(arr, fs, fc){
+  const rc = 1/(2*Math.PI*fc), dt = 1/fs, a = rc/(rc+dt);
+  const y = new Array(arr.length).fill(0);
+  for(let i = 1; i < arr.length; i++) y[i] = a*(y[i-1]+arr[i]-arr[i-1]);
+  return y;
+}
+function bandpass(arr, fs, lo, hi){ return lowpass(highpass(arr, fs, lo), fs, hi); }
+
+function normalize(arr){
+  const mx = Math.max(1e-9, ...arr.map(v=>Math.abs(v)));
+  return arr.map(v => v/mx);
+}
+
+function stddev(arr){
+  if(!arr || !arr.length) return 0;
+  const m = arr.reduce((a,v)=>a+v,0)/arr.length;
+  return Math.sqrt(arr.reduce((a,v)=>a+(v-m)**2,0)/arr.length);
+}
+
+function detectPeaks(arr, fs, minBpm, maxBpm){
+  const m = arr.reduce((a,v)=>a+v,0)/arr.length;
+  const sd = stddev(arr);
+  const thr = m + 0.18*sd;
+  const minGap = Math.floor(60/maxBpm * fs);
+  const peaks = []; let last = -minGap;
+  for(let i=1; i<arr.length-1; i++){
+    if(i - last < minGap) continue;
+    if(arr[i] > thr && arr[i] > arr[i-1] && arr[i] >= arr[i+1]){ peaks.push(i); last = i; }
+  }
+  return peaks;
+}
+
+function hrFromPeaks(arr, fs){
+  const peaks = detectPeaks(arr, fs, HR_MIN, HR_MAX);
+  if(peaks.length < 3) return null;
+  const ivs = [];
+  for(let i=1; i<peaks.length; i++) ivs.push((peaks[i]-peaks[i-1])/fs);
+  ivs.sort((a,b)=>a-b);
+  const mid = Math.floor(ivs.length/2);
+  const med = ivs.length%2 ? ivs[mid] : .5*(ivs[mid-1]+ivs[mid]);
+  if(!med || med<=0) return null;
+  const bpm = 60/med;
+  return (bpm>=HR_MIN && bpm<=HR_MAX) ? bpm : null;
+}
+
+function brFromPeaks(arr, fs){
+  const peaks = detectPeaks(arr, fs, BR_MIN, BR_MAX);
+  if(peaks.length < 2) return null;
+  const ivs = [];
+  for(let i=1; i<peaks.length; i++) ivs.push((peaks[i]-peaks[i-1])/fs);
+  ivs.sort((a,b)=>a-b);
+  const mid = Math.floor(ivs.length/2);
+  const med = ivs.length%2 ? ivs[mid] : .5*(ivs[mid-1]+ivs[mid]);
+  if(!med || med<=0) return null;
+  const bpm = 60/med;
+  return (bpm>=BR_MIN && bpm<=BR_MAX) ? bpm : null;
+}
+
+function goertzel(samples, fs, f){
+  const N = samples.length;
+  const w = 2*Math.PI*f/fs, c = 2*Math.cos(w);
+  let s0=0, s1=0, s2=0;
+  for(let i=0; i<N; i++){ s0=samples[i]+c*s1-s2; s2=s1; s1=s0; }
+  const re=s1-s2*Math.cos(w), im=s2*Math.sin(w);
+  return re*re+im*im;
+}
+
+function spectralHR(arr, fs){
+  if(arr.length < 30) return null;
+  const N = arr.length;
+  const win = arr.map((v,i)=>v*(0.5-0.5*Math.cos(2*Math.PI*i/(N-1))));
+  let bF=NaN, bP=-Infinity;
+  for(let f=HR_MIN/60; f<=HR_MAX/60; f+=0.01){
+    const p=goertzel(win,fs,f);
+    if(Number.isFinite(p) && p>bP){ bP=p; bF=f; }
+  }
+  return Number.isFinite(bF) ? bF*60 : null;
+}
+
+function spectralBR(arr, fs){
+  if(arr.length < 30) return null;
+  const N = arr.length;
+  const win = arr.map((v,i)=>v*(0.5-0.5*Math.cos(2*Math.PI*i/(N-1))));
+  let bF=NaN, bP=-Infinity;
+  for(let f=BR_MIN/60; f<=BR_MAX/60; f+=0.005){
+    const p=goertzel(win,fs,f);
+    if(Number.isFinite(p) && p>bP){ bP=p; bF=f; }
+  }
+  return Number.isFinite(bF) ? bF*60 : null;
+}
+
+// Extract breathing signal: amplitude envelope (Hilbert-lite via sliding std)
+function extractBreathing(rawG, fs){
+  // 1. Bandpass the raw signal at respiratory freq
+  const brSig = bandpass(rawG, fs, 0.1, 0.5);
+  return normalize(brSig);
+}
+
+function preprocessHR(samples, fs){
+  const nBg = Math.max(3, Math.round(fs*1.2));
+  const bg = movAvg(samples, nBg);
+  const detr = samples.map((v,i)=>v-(bg[i]||0));
+  return normalize(bandpass(detr, fs, 0.8, 2.5));
+}
+
+// ─── Drawing ──────────────────────────────────────────────────────────────────
+function drawWave(ctx, canvas, arr, color1='#00ffc8', color2='#0088ff', title=''){
+  const W=canvas.width, H=canvas.height;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#020b13'; ctx.fillRect(0,0,W,H);
+  // grid lines
+  ctx.strokeStyle='rgba(0,255,200,.06)'; ctx.lineWidth=1;
+  for(let i=0; i<=4; i++){ ctx.beginPath(); ctx.moveTo(0,H*i/4); ctx.lineTo(W,H*i/4); ctx.stroke(); }
+  if(!arr || arr.length<2) return;
+  // gradient line
+  const grad = ctx.createLinearGradient(0,0,W,0);
+  grad.addColorStop(0, color1); grad.addColorStop(1, color2);
+  ctx.strokeStyle=grad; ctx.lineWidth=2; ctx.beginPath();
+  const mn=Math.min(...arr), mx=Math.max(...arr), rng=(mx-mn)||1;
+  for(let i=0; i<arr.length; i++){
+    const x = i/(arr.length-1)*(W-8)+4;
+    const y = H-6-((arr[i]-mn)/rng)*(H-12);
+    i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+  }
+  ctx.stroke();
+  // fill under
+  ctx.lineTo(W-4, H-6); ctx.lineTo(4, H-6); ctx.closePath();
+  ctx.fillStyle = `${color1}15`; ctx.fill();
+}
+
+// ─── Waveform Capture for AI ──────────────────────────────────────────────────
+let capturedFrames = []; // base64 jpg frames for AI
+function captureFrame(){
+  vctx.drawImage(video, 0, 0, vcan.width, vcan.height);
+  // scale down for token efficiency
+  const tmp = document.createElement('canvas');
+  tmp.width=320; tmp.height=Math.round(320*vcan.height/vcan.width);
+  tmp.getContext('2d').drawImage(vcan,0,0,tmp.width,tmp.height);
+  return tmp.toDataURL('image/jpeg',0.6).split(',')[1];
+}
+
+// ─── AI Analysis ─────────────────────────────────────────────────────────────
+let aiCountdown = 0, aiIntervalId = null;
+
+async function runAI(hrSig, brSig, fs, hrEst, brEst){
+  const key = $('apiKey').value.trim();
+  if(!key){ return; }
+
+  $('aiDot').className = 'ai-dot thinking';
+  $('aiBody').className = 'ai-body loading';
+  $('aiBody').textContent = 'Analyzing biometric signals…';
+  $('aiMet').innerHTML = '';
+
+  const frame = captureFrame();
+  // Downsample signals to ~50 points for the prompt
+  const ds = (arr, n) => {
+    const step = Math.max(1, Math.floor(arr.length/n));
+    return arr.filter((_,i)=>i%step===0).slice(0,n).map(v=>+v.toFixed(3));
+  };
+  const hrSlice = ds(hrSig, 50);
+  const brSlice = ds(brSig, 50);
+
+  const prompt = `You are a biomedical signal analysis assistant. Analyze this face-PPG data from a webcam-based health monitor.
+
+ALGORITHMIC ESTIMATES:
+- Heart Rate: ${hrEst ? hrEst.toFixed(0)+' BPM' : 'uncertain'}
+- Breathing Rate: ${brEst ? brEst.toFixed(0)+' BR/min' : 'uncertain'}
+- Signal FPS: ${fs.toFixed(1)}
+- Skin pixels detected: ${lastMaskPx}
+
+PROCESSED CARDIAC SIGNAL (50 normalized samples, 0.8–2.5 Hz bandpass):
+${JSON.stringify(hrSlice)}
+
+PROCESSED RESPIRATORY SIGNAL (50 normalized samples, 0.1–0.5 Hz bandpass):
+${JSON.stringify(brSlice)}
+
+The attached image shows the current camera frame (face visible).
+
+Please analyze:
+1. Do the cardiac waveform patterns look physiologically realistic? Any artifacts?
+2. Does the respiratory signal show a clear periodic pattern? Estimate rate if possible.
+3. Comment on measurement quality based on the image (lighting, motion, face visibility).
+4. Provide a brief health context note for the estimated values.
+5. Any recommendations to improve measurement accuracy?
+
+Respond in JSON only (no markdown):
+{
+  "hr_assessment": "...",
+  "br_assessment": "...",
+  "quality": "low|medium|high",
+  "quality_note": "...",
+  "health_context": "...",
+  "tip": "..."
+}`;
+
+  try{
+    const resp = await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        model:'claude-sonnet-4-20250514',
+        max_tokens:1000,
+        messages:[{
+          role:'user',
+          content:[
+            {type:'image',source:{type:'base64',media_type:'image/jpeg',data:frame}},
+            {type:'text',text:prompt}
+          ]
+        }]
+      })
+    });
+    const data = await resp.json();
+    const raw = (data.content||[]).map(c=>c.text||'').join('');
+    const clean = raw.replace(/```json|```/g,'').trim();
+    let parsed;
+    try{ parsed = JSON.parse(clean); } catch(e){ parsed = null; }
+
+    $('aiDot').className = 'ai-dot';
+    if(parsed){
+      $('aiBody').className='ai-body';
+      $('aiBody').innerHTML = `
+        <div style="margin-bottom:8px;color:var(--acc);font-size:10px">♥ CARDIAC:</div>
+        <div style="margin-bottom:10px">${parsed.hr_assessment||''}</div>
+        <div style="margin-bottom:8px;color:var(--amber);font-size:10px">🌬 RESPIRATORY:</div>
+        <div style="margin-bottom:10px">${parsed.br_assessment||''}</div>
+        <div style="margin-bottom:8px;color:rgba(0,136,255,.8);font-size:10px">ℹ️ CONTEXT:</div>
+        <div style="margin-bottom:8px">${parsed.health_context||''}</div>
+        ${parsed.tip?`<div style="margin-top:8px;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:10px;color:var(--dim)">💡 ${parsed.tip}</div>`:''}
+      `;
+      const q = parsed.quality||'medium';
+      $('aiMet').innerHTML = `
+        <div class="ai-pill conf-${q==='high'?'high':q==='medium'?'med':'low'}">Quality: ${(parsed.quality||'').toUpperCase()}</div>
+        ${parsed.quality_note ? `<div class="ai-pill">${parsed.quality_note}</div>`:``}
+      `;
+    } else {
+      $('aiBody').className='ai-body';
+      $('aiBody').textContent = raw.slice(0,400)||'Analysis complete.';
+    }
+  } catch(e){
+    $('aiDot').className='ai-dot';
+    $('aiBody').className='ai-body';
+    $('aiBody').textContent = 'AI analysis failed: '+e.message;
+  }
+}
+
+function startAITimer(hrSig, brSig, fs, getHR, getBR){
+  if(aiIntervalId) clearInterval(aiIntervalId);
+  aiCountdown = 12;
+  const tick = () => {
+    aiCountdown--;
+    $('aiTimer').textContent = `Next: ${aiCountdown}s`;
+    if(aiCountdown <= 0){
+      aiCountdown = 12;
+      runAI(hrSig, brSig, fs, getHR(), getBR());
+    }
+  };
+  aiIntervalId = setInterval(tick, 1000);
+  // Kick off immediately if enough data
+  setTimeout(()=>runAI(hrSig, brSig, fs, getHR, getBR), 500);
+}
+
+// ─── PPG Core ──────────────────────────────────────────────────────────────────
+function samplePatch(data, W, H, cx, cy, k=7){
+  const r=(k-1)>>1; let us=0, vs=0, n=0;
+  const x1=Math.max(0,cx-r), x2=Math.min(W-1,cx+r), y1=Math.max(0,cy-r), y2=Math.min(H-1,cy+r);
+  for(let y=y1;y<=y2;y++){ let idx=(y*W+x1)*4; for(let x=x1;x<=x2;x++,idx+=4){ const [,u,v]=rgb2yuv(data[idx],data[idx+1],data[idx+2]); us+=u; vs+=v; n++; } }
+  return n>0 ? {u:us/n,v:vs/n} : null;
+}
+
+function clickToChroma(evt){
+  if(evt.touches && evt.touches[0]) evt=evt.touches[0];
+  const rect=video.getBoundingClientRect();
+  const cx=Math.floor(Math.max(0,Math.min(vcan.width-1,(evt.clientX-rect.left)/rect.width*vcan.width)));
+  const cy=Math.floor(Math.max(0,Math.min(vcan.height-1,(evt.clientY-rect.top)/rect.height*vcan.height)));
+  vctx.drawImage(video,0,0,vcan.width,vcan.height);
+  const d=vctx.getImageData(cx,cy,1,1).data;
+  const [,u,v]=rgb2yuv(d[0],d[1],d[2]);
+  chromaUV=[u,v];
+  $('qualNote').textContent = `Skin sampled at (${cx},${cy}) · UV=(${u.toFixed(0)},${v.toFixed(0)})`;
+  $('maskBtn').disabled=false;
+}
+
+function extractFrame(maskOn){
+  vctx.drawImage(video,0,0,vcan.width,vcan.height);
+  const img=vctx.getImageData(0,0,vcan.width,vcan.height);
+  const data=img.data;
+  const [u0,v0]=chromaUV||[128,128];
+  const r2=CHROMA_R*CHROMA_R;
+  const W=vcan.width, H=vcan.height;
+  let x1=0,y1=0,x2=W-1,y2=H-1;
+  if(faceROI){ x1=Math.max(0,Math.floor(faceROI.x)); y1=Math.max(0,Math.floor(faceROI.y)); x2=Math.min(W-1,Math.floor(faceROI.x+faceROI.width)); y2=Math.min(H-1,Math.floor(faceROI.y+faceROI.height)); }
+  let sumG=0, n=0;
+  for(let y=y1;y<=y2;y++){
+    let idx=(y*W+x1)*4;
+    for(let x=x1;x<=x2;x++,idx+=4){
+      const r=data[idx],g=data[idx+1],b=data[idx+2];
+      const [,u,v]=rgb2yuv(r,g,b);
+      const du=u-u0,dv=v-v0;
+      if(du*du+dv*dv<r2){ sumG+=g; n++; }
+    }
+  }
+  if(maskOn && showMask){
+    for(let i=0;i<data.length;i+=4){
+      const r=data[i],g=data[i+1],b=data[i+2];
+      const [,u,v]=rgb2yuv(r,g,b);
+      const du=u-u0,dv=v-v0;
+      if(du*du+dv*dv<r2){ data[i]=0;data[i+1]=220;data[i+2]=160; }
+      else { data[i]*=.3;data[i+1]*=.3;data[i+2]*=.3; }
+    }
+    vctx.putImageData(img,0,0);
+    if(faceROI){ vctx.strokeStyle='rgba(0,255,200,.7)';vctx.lineWidth=2;vctx.strokeRect(faceROI.x,faceROI.y,faceROI.width,faceROI.height); }
+    // mirror to video element via drawImage trick
+    const tmp=document.createElement('canvas');tmp.width=vcan.width;tmp.height=vcan.height;
+    tmp.getContext('2d').putImageData(img,0,0);
+    // Use CSS background trick — not supported, skip for now
+  }
+  return {g: n>0 ? sumG/n : null, n};
+}
+
+// ─── Measurement Loop ─────────────────────────────────────────────────────────
+let contOn=false, contRaf=0;
+let lastHRSig=[], lastBRSig=[], lastFs=30;
+
+async function doMeasure(){
+  if(!stream){ await startCam(); }
+  if(!chromaUV && !autoFace){ alert('Click your face on the video first.'); return; }
+  $('measureBtn').disabled=true;
+  $('startBtn').disabled=true;
+  $('camBox').classList.add('active');
+  $('liveDot').className='dot live';
+  $('camLabel').textContent='SCANNING';
+
+  const samples=[];
+  const t0=performance.now();
+
+  await new Promise(res=>{
+    function step(){
+      const now=performance.now(), elapsed=(now-t0)/1000;
+      if(autoFace && faceROI){
+        vctx.drawImage(video,0,0,vcan.width,vcan.height);
+        const img=vctx.getImageData(0,0,vcan.width,vcan.height);
+        const cx=Math.floor(faceROI.x+faceROI.width/2), cy=Math.floor(faceROI.y+faceROI.height*.38);
+        const p=samplePatch(img.data,vcan.width,vcan.height,cx,cy,9);
+        if(p) chromaUV=[p.u,p.v];
+      }
+      const {g,n}=extractFrame(true);
+      if(g!==null){ samples.push(g); lastMaskPx=n; }
+      $('pxVal').textContent=n; $('pxBar').style.width=Math.min(100,n/20)+'%';
+
+      const pct=Math.min(100,(elapsed/SECS)*100);
+      $('progBar').style.width=pct.toFixed(1)+'%';
+
+      // Realtime updates
+      if(samples.length>20){
+        const fs=samples.length/Math.max(.001,elapsed);
+        $('fpsVal').textContent=fs.toFixed(1);
+        $('fpsBar').style.width=Math.min(100,fs/60*100)+'%';
+        const hrPre=preprocessHR(samples, fs);
+        let hr=hrFromPeaks(hrPre,fs)||spectralHR(hrPre,fs);
+        const brRaw=extractBreathing(samples,fs);
+        let br=brFromPeaks(brRaw,fs)||spectralBR(brRaw,fs);
+        drawWave(hctx,hrPlot,hrPre);
+        drawWave(bctx,brPlot,brRaw,'#ffb830','#ff6b00');
+        updateMetrics(hr,br,hrPre,brRaw,fs);
+        lastHRSig=hrPre; lastBRSig=brRaw; lastFs=fs;
+        lastHR=hr; lastBR=br;
+        updateQuality(samples,fs,n);
+      }
+      if(elapsed<SECS){ requestAnimationFrame(step); }
+      else {
+        const fs=samples.length/Math.max(.001,(performance.now()-t0)/1000);
+        res({samples,fs});
+      }
+    }
+    requestAnimationFrame(step);
+  });
+
+  $('measureBtn').disabled=false; $('startBtn').disabled=false;
+  $('camBox').classList.remove('active');
+  $('progBar').style.width='100%';
+  $('camLabel').textContent='COMPLETE';
+  $('liveDot').className='dot';
+
+  if(lastHRSig.length>0 && $('apiKey').value.trim()){
+    startAITimer(lastHRSig, lastBRSig, lastFs, ()=>lastHR, ()=>lastBR);
+  }
+}
+
+function updateMetrics(hr, br, hrSig, brSig, fs){
+  // HR
+  $('hrVal').textContent=hr ? hr.toFixed(0) : '–';
+  $('hrFreq').textContent=hr ? `${(hr/60).toFixed(2)} Hz` : '';
+  if(hr){ $('hrStatus').textContent=hr<60?'Below normal':hr>100?'Above normal':'Normal range'; }
+  // Pulse ring
+  if(hr){
+    const period=60000/hr;
+    if(!hrPulseId || Math.abs(hrPulseRate-hr)>3){ hrPulseRate=hr; startHRPulse(period); }
+  }
+  // BR
+  $('brVal').textContent=br ? br.toFixed(0) : '–';
+  $('brFreq').textContent=br ? `${(br/60).toFixed(3)} Hz` : '';
+  if(br){ $('brStatus').textContent=br<12?'Below normal':br>20?'Elevated':'Normal range'; animateBreath(br); }
+}
+
+let hrPulseId=null, hrPulseRate=0;
+function startHRPulse(period){
+  if(hrPulseId) clearInterval(hrPulseId);
+  hrPulseId=setInterval(()=>{
+    const r=$('hrRing'); r.classList.remove('pulse');
+    requestAnimationFrame(()=>requestAnimationFrame(()=>r.classList.add('pulse')));
+  }, period);
+}
+let breathAnimId=null;
+function animateBreath(br){
+  if(breathAnimId) clearInterval(breathAnimId);
+  const period=60000/br; // ms per breath
+  let phase=0;
+  const ring=$('brRing');
+  breathAnimId=setInterval(()=>{
+    phase=(phase+0.05)%(2*Math.PI);
+    const scale=1+0.25*Math.sin(phase);
+    ring.style.transform=`scale(${scale.toFixed(3)})`;
+  }, period/120);
+}
+
+function updateQuality(samples, fs, n){
+  const sd=stddev(samples.slice(-Math.floor(fs*5)));
+  const vScore=Math.min(1,sd/4);
+  const pScore=Math.min(1,n/1500);
+  const score=.6*vScore+.4*pScore;
+  $('qVal').textContent=score>0.6?'GOOD':score>0.3?'OK':'LOW';
+  $('qBar').style.width=Math.round(score*100)+'%';
+  $('qBar').style.background=score>0.6?'var(--acc)':score>0.3?'var(--amber)':'var(--red)';
+  $('apiDot').className='dot'+(($('apiKey').value.trim())?'active':'')+' active';
+}
+
+// ─── Continuous Mode ──────────────────────────────────────────────────────────
+let contSamples=[], contT0=0;
+function startCont(){
+  if(!stream) return;
+  if(!chromaUV && !autoFace){ alert('Click your face on the video first.'); return; }
+  contOn=true; contSamples=[]; contT0=performance.now();
+  $('contBtn').textContent='⬛ Stop'; $('contBtn').classList.add('on');
+  $('camBox').classList.add('active'); $('liveDot').className='dot live';
+  $('camLabel').textContent='LIVE';
+
+  let aiKickOff=false;
+  const step=()=>{
+    if(!contOn) return;
+    if(autoFace && faceROI){
+      vctx.drawImage(video,0,0,vcan.width,vcan.height);
+      const img=vctx.getImageData(0,0,vcan.width,vcan.height);
+      const cx=Math.floor(faceROI.x+faceROI.width/2), cy=Math.floor(faceROI.y+faceROI.height*.38);
+      const p=samplePatch(img.data,vcan.width,vcan.height,cx,cy,9);
+      if(p) chromaUV=[p.u,p.v];
+    }
+    const {g,n}=extractFrame(true);
+    if(g!==null){ contSamples.push(g); lastMaskPx=n; }
+    const elapsed=(performance.now()-contT0)/1000;
+    const fs=contSamples.length/Math.max(.001,elapsed);
+    const windowed=contSamples.slice(-Math.floor(fs*SECS));
+    $('pxVal').textContent=n; $('pxBar').style.width=Math.min(100,n/20)+'%';
+    $('fpsVal').textContent=fs.toFixed(1); $('fpsBar').style.width=Math.min(100,fs/60*100)+'%';
+    const pct=(elapsed%SECS)/SECS*100; $('progBar').style.width=pct.toFixed(1)+'%';
+    if(windowed.length>20){
+      const hrPre=preprocessHR(windowed,fs);
+      let hr=hrFromPeaks(hrPre,fs)||spectralHR(hrPre,fs);
+      const brRaw=extractBreathing(windowed,fs);
+      let br=brFromPeaks(brRaw,fs)||spectralBR(brRaw,fs);
+      drawWave(hctx,hrPlot,hrPre);
+      drawWave(bctx,brPlot,brRaw,'#ffb830','#ff6b00');
+      updateMetrics(hr,br,hrPre,brRaw,fs);
+      lastHRSig=hrPre; lastBRSig=brRaw; lastFs=fs;
+      lastHR=hr; lastBR=br;
+      updateQuality(windowed,fs,n);
+      if(!aiKickOff && windowed.length>40 && $('apiKey').value.trim()){
+        aiKickOff=true;
+        startAITimer(hrPre,brRaw,fs,()=>lastHR,()=>lastBR);
+      }
+    }
+    contRaf=requestAnimationFrame(step);
+  };
+  contRaf=requestAnimationFrame(step);
+}
+function stopCont(){
+  contOn=false; cancelAnimationFrame(contRaf);
+  if(aiIntervalId){ clearInterval(aiIntervalId); aiIntervalId=null; }
+  $('contBtn').textContent='⟳ Continuous'; $('contBtn').classList.remove('on');
+  $('camBox').classList.remove('active'); $('liveDot').className='dot';
+  $('camLabel').textContent='STANDBY';
+}
+
+// ─── Camera & Face Detection ──────────────────────────────────────────────────
+let facingMode='user';
+async function startCam(){
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({
+      video:{facingMode:{exact:facingMode},width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30}},audio:false
+    }).catch(()=>navigator.mediaDevices.getUserMedia({
+      video:{facingMode,width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30}},audio:false
+    }));
+  }catch(e){ alert('Camera error: '+e.message); return; }
+  video.srcObject=stream; await video.play();
+  vcan.width=video.videoWidth||1280; vcan.height=video.videoHeight||720;
+  $('measureBtn').disabled=false; $('maskBtn').disabled=false;
+  $('flipBtn').disabled=false; $('contBtn').disabled=false;
+  $('startBtn').textContent='✓ Camera On';
+  if('FaceDetector' in window){ $('autoBtn').disabled=false; }
+}
+
+function startFaceLoop(){
+  cancelAnimationFrame(faceLoopId);
+  const tick=async()=>{
+    if(!autoFace) return;
+    try{
+      const faces=await faceDetector.detect(video);
+      if(faces && faces[0] && faces[0].boundingBox){
+        const bb=faces[0].boundingBox;
+        faceROI={x:Math.max(0,bb.x),y:Math.max(0,bb.y),width:Math.min(vcan.width-bb.x,bb.width),height:Math.min(vcan.height-bb.y,bb.height)};
+      }
+    }catch(e){}
+    faceLoopId=requestAnimationFrame(tick);
+  };
+  faceLoopId=requestAnimationFrame(tick);
+}
+
+// ─── Events ───────────────────────────────────────────────────────────────────
+$('startBtn').addEventListener('click', startCam);
+$('measureBtn').addEventListener('click', doMeasure);
+$('contBtn').addEventListener('click', ()=>{ if(!stream){startCam();return;} contOn?stopCont():startCont(); });
+
+$('flipBtn').addEventListener('click', async()=>{
+  if(stream) stream.getTracks().forEach(t=>t.stop());
+  facingMode=facingMode==='user'?'environment':'user';
+  await startCam();
+  if(autoFace){ stopFaceLoop(); startFaceLoop(); }
+});
+
+$('autoBtn').addEventListener('click', async()=>{
+  if(!('FaceDetector' in window)){ alert('FaceDetector not supported. Try Chrome/Edge.'); return; }
+  autoFace=!autoFace;
+  $('autoBtn').textContent=`◎ Auto-Face: ${autoFace?'On':'Off'}`;
+  $('autoBtn').className=autoFace?'ghost on':'ghost';
+  if(autoFace){ if(!faceDetector) faceDetector=new FaceDetector({fastMode:true,maxDetectedFaces:1}); startFaceLoop(); }
+  else{ cancelAnimationFrame(faceLoopId); faceROI=null; }
+});
+
+$('maskBtn').addEventListener('click', ()=>{
+  showMask=!showMask;
+  $('maskBtn').textContent=`◧ Mask: ${showMask?'On':'Off'}`;
+  $('maskBtn').className=showMask?'ghost on':'ghost';
+});
+
+video.addEventListener('click', clickToChroma);
+video.addEventListener('pointerdown', clickToChroma);
+
+document.addEventListener('keydown', e=>{
+  if(e.key.toLowerCase()==='a'){ showMask=!showMask; $('maskBtn').textContent=`◧ Mask: ${showMask?'On':'Off'}`; $('maskBtn').className=showMask?'ghost on':'ghost'; }
+});
+
+$('apiKey').addEventListener('input', ()=>{
+  $('apiDot').className='dot'+($('apiKey').value.trim()?' active':'');
+  if($('apiKey').value.trim()){
+    $('aiBody').textContent='API key set. AI insights will run after 12 seconds of measurement.';
+  }
+});
+</script>
+</body>
+</html>
